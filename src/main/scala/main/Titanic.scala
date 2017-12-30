@@ -8,9 +8,6 @@ import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
-//https://github.com/raphaelbrugier/kaggle-titanic/
-//https://github.com/BenFradet/spark-kaggle/
-
 object Titanic {
 
   val sqlContext: SparkSession = SparkSession
@@ -48,22 +45,21 @@ object Titanic {
       .option("inferSchema", "true")
       .load("src/main/resources/data/titanic/test.csv")
 
-    // fill age na
+    // fill age na-s
     val averageAge = computeAverageAge(training, test)
     training = training.na.fill(averageAge, Array("Age"))
     test = test.na.fill(averageAge, Array("Age"))
 
-    // fill Embarked na
+    // fill embarked na-s
     training = training.na.fill("S", Array("Embarked"))
     test = test.na.fill("S", Array("Embarked"))
 
-    // fill Fare na
+    // fill fare na-s
     val averageFare = computeAverageFare(training,test)
-    //training = training.na.drop("any", Array("Fare"))
     training = training.na.fill(averageFare, Array("Fare"))
     test = test.na.fill(averageFare, Array("Fare"))
 
-    // add title
+    // make title categories more general
     val nameToTitle: String => String = _.replaceAll(""".*, |\..*""", "") match {
       case "Miss" => "Miss"
       case "Mr" => "Mr"
@@ -85,18 +81,13 @@ object Titanic {
     training = training.withColumn("title", udf(nameToTitle).apply(training("Name")))
     test = test.withColumn("title", udf(nameToTitle).apply(test("Name")))
 
-    // Add mother or not
+    //whether the person is a mother
     val mother = when(expr("Sex == 'female' AND Age > 18.0 AND Parch > 1"), 1).otherwise(0)
 
     training = training.withColumn("mother", mother)
     test = test.withColumn("mother", mother)
 
-//    val familySize: ((Int, Int) => Int) = (sibSp: Int, parCh: Int) => sibSp + parCh + 1
-//    val familySizeUDF = udf(familySize)
-//
-//    training = training.withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
-//    test = test.withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
-
+    //spark.ml can’t handle categorical features or labels unless they are indexed
 
     // Index Sex
     val sexIndexer = new StringIndexer()
@@ -128,8 +119,9 @@ object Titanic {
       .setOutputCol("Label")
       .fit(training)
 
-    val features: Array[String] = Array("pclassIndex", "Age", "Fare", "SexIndex", "EmbarkedIndex", "titleIndex", "mother")//, "Parch") //#FamilySize
-    // Features
+    val features: Array[String] = Array("pclassIndex", "Age", "Fare", "SexIndex", "EmbarkedIndex", "titleIndex", "mother")
+
+    //assembling all feature columns into one vector column because every spark.ml machine learning algorithm expects that
     val assembler = new VectorAssembler()
       .setInputCols(features)
       .setOutputCol("Features")
@@ -138,6 +130,7 @@ object Titanic {
       .setLabelCol("Label")
       .setFeaturesCol("Features")
 
+    //A pipeline is an ordered combination of Transformers and Estimators.
     val pipeline = new Pipeline().setStages(
       Array(sexIndexer,
         embarkedIndexer,
@@ -152,7 +145,7 @@ object Titanic {
     // training the model
     val model = pipeline.fit(training)
 
-    // Use the model to make predictions
+    // using the model to make predictions
     val predictions = model.transform(test)
     predictions.selectExpr("PassengerId", "cast(prediction as int) Survived")
       .repartition(1)
@@ -160,8 +153,6 @@ object Titanic {
       .format("com.databricks.spark.csv")
       .option("header", "true")
       .save("target/predictions.csv")
-
-    predictions.show()
 
 
     // With cross validation
@@ -193,7 +184,6 @@ object Titanic {
       .option("header", "true")
       .save("target/predictionsCV.csv")
 
-    predictionsCV.show()
   }
 
 }
