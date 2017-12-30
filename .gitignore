@@ -1,0 +1,9 @@
+/spark-warehouse
+/.idea
+/resultsgithub.csv
+target
+*.ipr
+*.iws
+*.xml
+project/boot/
+project/plugins/project/
